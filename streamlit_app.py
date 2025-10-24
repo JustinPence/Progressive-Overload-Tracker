@@ -2,11 +2,12 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
 import datetime
+import os
+import openai
 
-st.set_page_config(page_title="Progressive Overload (Cloud)", layout="wide")
+st.set_page_config(page_title="Progressive Overload Tracker", layout="wide")
 
 # --- Connect to Supabase ---
-import os
 SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -21,6 +22,37 @@ def e1rm(weight, reps):
 def get_user_data(user_id):
     res = supabase.table("workouts").select("*").eq("user_id", user_id).execute()
     return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+
+# --- AI Suggestion Function ---
+openai.api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+def generate_ai_suggestion(exercise, data):
+    recent = data[data["exercise"] == exercise].sort_values("date", ascending=False).head(5)
+    if recent.empty:
+        return "No data available for AI analysis yet."
+
+    text_summary = "\n".join(
+        f"{r['date']}: {r['weight_lb']} lb x {r['reps']} reps"
+        for _, r in recent.iterrows()
+    )
+
+    prompt = f"""
+    You are a strength training coach. Based on the following recent {exercise} logs:
+    {text_summary}
+
+    Suggest a specific next workout goal (weight and reps) and include a short motivational tip.
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"AI suggestion unavailable: {e}"
 
 # --- Authentication ---
 if "user" not in st.session_state:
@@ -79,89 +111,67 @@ if st.sidebar.button("Logout"):
 
 st.title("🏋️ Progressive Overload Tracker")
 
+# --- Tabs for Logging & Progress ---
+tab1, tab2 = st.tabs(["📋 Log Workout", "📈 Progress"])
 
-# --- Log Workout ---
-st.header("Log a Set")
+# --- Tab 1: Log Workout ---
+with tab1:
+    st.header("Log a New Workout")
 
-date = st.date_input("Date", datetime.date.today())
-exercise = st.text_input("Exercise")
-weight = st.number_input("Weight", min_value=0.0, step=1.0)
-unit = st.selectbox("Unit", ["lb", "kg"])
-reps = st.number_input("Reps", min_value=1, step=1)
-rpe = st.text_input("RPE (optional)")
-notes = st.text_area("Notes (optional)")
+    date = st.date_input("Date", datetime.date.today())
+    exercise = st.text_input("Exercise")
+    weight = st.number_input("Weight", min_value=0.0, step=1.0)
+    unit = st.selectbox("Unit", ["lb", "kg"])
+    reps = st.number_input("Reps", min_value=1, step=1)
+    rpe = st.text_input("RPE (optional)")
+    notes = st.text_area("Notes (optional)")
 
-if st.button("Log Set ✅"):
-    exercise = exercise.strip().title()
-    weight_lb = convert_to_lb(weight, unit)
-    supabase.table("workouts").insert({
-        "user_id": st.session_state.user.id,
-        "date": str(date),
-        "exercise": exercise,
-        "weight_lb": weight_lb,
-        "reps": reps,
-        "rpe": rpe,
-        "notes": notes
-    }).execute()
-    st.success(f"Logged {exercise} — {weight_lb:.1f} lb x {reps} reps")
-    st.experimental_rerun()
+    if st.button("Log Set ✅"):
+        exercise = exercise.strip().title()
+        weight_lb = convert_to_lb(weight, unit)
+        supabase.table("workouts").insert({
+            "user_id": st.session_state.user.id,
+            "date": str(date),
+            "exercise": exercise,
+            "weight_lb": weight_lb,
+            "reps": reps,
+            "rpe": rpe,
+            "notes": notes
+        }).execute()
+        st.success(f"Logged {exercise} — {weight_lb:.1f} lb x {reps} reps")
+        st.experimental_rerun()
 
-# --- Load Data ---
-data = get_user_data(st.session_state.user.id)
+# --- Tab 2: Progress ---
+with tab2:
+    st.header("Your Progress")
+    data = get_user_data(st.session_state.user.id)
 
-if not data.empty:
-    st.subheader("📈 Exercise Progress")
-    selected_exercise = st.selectbox("Choose an exercise to view progress", data["exercise"].unique())
-    df_ex = data[data["exercise"] == selected_exercise].sort_values("date")
+    if data.empty:
+        st.warning("No workouts logged yet! Log your first set in the 'Log Workout' tab.")
+    else:
+        selected_exercise = st.selectbox("Choose an exercise to view progress", data["exercise"].unique())
+        df_ex = data[data["exercise"] == selected_exercise].sort_values("date")
 
-    st.line_chart(df_ex, x="date", y="weight_lb")
+        st.line_chart(df_ex, x="date", y="weight_lb")
 
-    top_set = df_ex["weight_lb"].max()
-    st.info(f"Your top set for {selected_exercise}: **{top_set} lb**")
+        top_set = df_ex["weight_lb"].max()
+        st.info(f"Your top set for {selected_exercise}: **{top_set} lb**")
 
-    # --- AI Suggestion ---
-import openai
+        if st.button("💡 Get AI Suggestion"):
+            suggestion = generate_ai_suggestion(selected_exercise, data)
+            st.info(suggestion)
 
-openai.api_key = st.secrets.get("OPENAI_API_KEY")
-
-def generate_ai_suggestion(exercise, data):
-    recent = data[data["exercise"] == exercise].sort_values("date", ascending=False).head(5)
-    text_summary = "\n".join(
-        f"{r['date']}: {r['weight_lb']} lb x {r['reps']} reps" for _, r in recent.iterrows()
-    )
-
-    prompt = f"""
-    You are a strength training coach. Based on the following recent {exercise} logs:
-    {text_summary}
-
-    Suggest a specific next workout goal (weight and reps) and include a short motivational tip.
-    """
-
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
-            temperature=0.7,
+        # --- Delete Section within Progress tab ---
+        st.subheader("🗑️ Delete Past Entries")
+        delete_row = st.multiselect(
+            "Select rows to delete:",
+            df_ex.index,
+            format_func=lambda i: f"{df_ex.iloc[i]['date']} – ({df_ex.iloc[i]['weight_lb']} lb x {df_ex.iloc[i]['reps']} reps)"
         )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"AI suggestion unavailable: {e}"
 
-
-# ==== Delete Section ====
-st.subheader("🗑️ Delete Past Entries")
-delete_row = st.multiselect(
-    "Select rows to delete:",
-    df_ex.index,
-    format_func=lambda i: f"{df_ex.iloc[i]['date']} – {df_ex.iloc[i]['exercise']} ({df_ex.iloc[i]['weight_lb']} lb x {df_ex.iloc[i]['reps']})",
-)
-
-if st.button("Delete Selected"):
-    for i in delete_row:
-        row_id = df_ex.iloc[i]["id"]
-        supabase.table("workouts").delete().eq("id", row_id).execute()
-    st.success("Deleted selected entries.")
-    st.experimental_rerun()
-else:
-    st.warning("No data yet – log your first workout above!")
+        if st.button("Delete Selected"):
+            for i in delete_row:
+                row_id = df_ex.iloc[i]["id"]
+                supabase.table("workouts").delete().eq("id", row_id).execute()
+            st.success("Deleted selected entries.")
+            st.experimental_rerun()
