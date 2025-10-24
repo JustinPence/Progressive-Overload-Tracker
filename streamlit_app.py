@@ -77,9 +77,8 @@ st.sidebar.success(f"Logged in as: {st.session_state.user.email}")
 if st.sidebar.button("Logout"):
     logout()
 
-st.title("🏋️ Progressive Overload — Cloud Edition (Private)")
+st.title("🏋️ Progressive Overload Tracker")
 
-st.write("Connected to Supabase ✅")
 
 # --- Log Workout ---
 st.header("Log a Set")
