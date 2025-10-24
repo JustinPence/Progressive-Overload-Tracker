@@ -149,19 +149,40 @@ with tab2:
     if data.empty:
         st.warning("No workouts logged yet! Log your first set in the 'Log Workout' tab.")
     else:
+        import plotly.express as px
+
         selected_exercise = st.selectbox("Choose an exercise to view progress", data["exercise"].unique())
         df_ex = data[data["exercise"] == selected_exercise].sort_values("date")
 
-        st.line_chart(df_ex, x="date", y="weight_lb")
+        # --- Summary Cards ---
+        total_sets = len(df_ex)
+        heaviest = df_ex["weight_lb"].max()
+        best_e1rm = df_ex.apply(lambda r: e1rm(r["weight_lb"], r["reps"]), axis=1).max()
 
-        top_set = df_ex["weight_lb"].max()
-        st.info(f"Your top set for {selected_exercise}: **{top_set} lb**")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Sets Logged", total_sets)
+        col2.metric("Heaviest Lift (lb)", round(heaviest, 1))
+        col3.metric("Best e1RM (lb)", round(best_e1rm, 1))
 
+        # --- Interactive Chart (Plotly) ---
+        fig = px.line(
+            df_ex,
+            x="date",
+            y="weight_lb",
+            markers=True,
+            title=f"{selected_exercise} Progress Over Time",
+            labels={"weight_lb": "Weight (lb)", "date": "Date"},
+        )
+        fig.update_traces(mode="lines+markers", hovertemplate="%{x}: %{y} lb")
+        fig.update_layout(hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- AI Suggestion ---
         if st.button("💡 Get AI Suggestion"):
             suggestion = generate_ai_suggestion(selected_exercise, data)
             st.info(suggestion)
 
-        # --- Delete Section within Progress tab ---
+        # --- Delete Section ---
         st.subheader("🗑️ Delete Past Entries")
         delete_row = st.multiselect(
             "Select rows to delete:",

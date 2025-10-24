@@ -4,3 +4,4 @@ matplotlib
 supabase
 python-dotenv
 openai
+plotly
