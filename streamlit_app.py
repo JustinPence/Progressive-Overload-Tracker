@@ -1,288 +1,137 @@
-
-import os
-from datetime import datetime, date
-from typing import Optional
-
-import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
-from dotenv import load_dotenv
-load_dotenv()
 from supabase import create_client, Client
+import pandas as pd
+import datetime
 
-LB_PER_KG = 2.2046226218
+st.set_page_config(page_title="Progressive Overload (Cloud)", layout="wide")
 
-# -------------------- Supabase setup --------------------
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
+# --- Connect to Supabase ---
+import os
+SUPABASE_URL = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
+SUPABASE_KEY = st.secrets.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-@st.cache_resource(show_spinner=False)
-def get_sb() -> Optional[Client]:
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-        return None
-    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+# --- Helper Functions ---
+def convert_to_lb(weight, unit):
+    return weight if unit == "lb" else weight * 2.20462
 
-sb = get_sb()
+def e1rm(weight, reps):
+    return round(weight * (1 + reps / 30.0), 1)
 
-def require_supabase():
-    if sb is None:
-        st.error("Supabase credentials not found. Set SUPABASE_URL and SUPABASE_ANON_KEY in your environment (see README).")
-        st.stop()
+def get_user_data(user_id):
+    res = supabase.table("workouts").select("*").eq("user_id", user_id).execute()
+    return pd.DataFrame(res.data) if res.data else pd.DataFrame()
 
-# -------------------- Data access helpers --------------------
-TABLE = "workouts"
+# --- Authentication ---
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-def insert_set(date_s: str, exercise: str, weight_lb: float, reps: int, rpe: str = "", notes: str = ""):
-    require_supabase()
-    payload = {
-        "date": date_s,
-        "exercise": exercise.strip(),
-        "weight_lb": float(weight_lb),
-        "reps": int(reps),
-        "rpe": (rpe or "").strip(),
-        "notes": (notes or "").strip(),
-    }
-    sb.table(TABLE).insert(payload).execute()
-
-def fetch_exercises() -> list[str]:
-    require_supabase()
-    res = sb.table(TABLE).select("exercise").execute()
-    if not res.data:
-        return []
-    df = pd.DataFrame(res.data)
-    if df.empty:
-        return []
-    return sorted(df["exercise"].dropna().astype(str).str.strip().unique().tolist())
-
-def fetch_sets(exercise: Optional[str] = None) -> pd.DataFrame:
-    require_supabase()
-    q = sb.table(TABLE).select("*")
-    if exercise:
-        q = q.eq("exercise", exercise)
-    q = q.order("date", desc=False).order("created_at", desc=False)
-    res = q.execute()
-    df = pd.DataFrame(res.data or [])
-    if df.empty:
-        return pd.DataFrame(columns=["date","exercise","weight_lb","reps","rpe","notes","created_at","id"])
-    # Ensure dtypes
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"]).dt.date
-    if "weight_lb" in df.columns:
-        df["weight_lb"] = pd.to_numeric(df["weight_lb"], errors="coerce")
-    if "reps" in df.columns:
-        df["reps"] = pd.to_numeric(df["reps"], errors="coerce").astype("Int64")
-    return df
-
-# -------------------- Logic --------------------
-def compute_topsets_by_day(df_ex: pd.DataFrame) -> pd.DataFrame:
-    if df_ex.empty:
-        return pd.DataFrame(columns=["date","top_weight_lb"])
-    d = (df_ex.groupby("date", as_index=False)
-                 .agg(top_weight_lb=("weight_lb","max"))).sort_values("date")
-    return d
-
-def get_last_topset(df_ex: pd.DataFrame):
-    """Return tuple (date, weight_lb, reps) for the last session's top set, or None."""
-    if df_ex.empty:
-        return None
-    # latest date
-    last_date = max(df_ex["date"])
-    day = df_ex[df_ex["date"] == last_date].copy()
-    if day.empty:
-        return None
-    max_w = day["weight_lb"].max()
-    top = day[day["weight_lb"] == max_w].sort_values("created_at").iloc[-1]
-    return (last_date, float(top["weight_lb"]), int(top["reps"]) if pd.notna(top["reps"]) else None)
-
-def suggestion_next_goal(df_ex: pd.DataFrame) -> str:
-    if df_ex.empty:
-        return "Log a couple sessions first; I'll suggest targets once I see a trend."
-    tops = compute_topsets_by_day(df_ex)
-    if tops.empty:
-        return "Log a couple sessions first; I'll suggest targets once I see a trend."
-    if len(tops) == 1:
-        w = tops["top_weight_lb"].iloc[-1]
-        return f"Next time, try repeating {w:.0f} lb and add +1 rep if it felt manageable."
-    last = tops["top_weight_lb"].tolist()[-3:]
-    inc = sum(1 for i in range(1, len(last)) if last[i] > last[i-1])
-    if inc >= 2:
-        next_w = last[-1] + 5
-        return f"Nice upward trend! Consider {next_w:.0f} lb for your top set; keep reps similar to last session."
-    if len(set(round(x) for x in last)) == 1:
-        return "You've plateaued at the same top weight. Try +2.5–5 lb OR keep weight and add +1–2 reps."
-    if last[-1] < max(last):
-        return f"Bit of a dip last time. Repeat ~{last[-1]:.0f} lb and aim +1–2 reps to regain momentum."
-    return "Solid consistency. Try a small +2.5–5 lb increase or add +1 rep at the same top weight."
-
-def epley_e1rm(weight_lb: float, reps: int) -> float:
-    return float(weight_lb * (1 + (reps or 0) / 30))
-
-# -------------------- UI --------------------
-st.set_page_config(page_title="Progressive Overload (Cloud)", page_icon="🏋️", layout="wide")
-st.title("🏋️ Progressive Overload — Cloud Edition")
-
-if sb is None:
-    st.warning("Add your Supabase credentials to run this app. See README for setup.")
-else:
-    st.success("Connected to Supabase")
-
-with st.sidebar:
-    st.header("Log a Set")
-    date_val = st.date_input("Date", value=date.today())
-    exercise = st.text_input("Exercise", placeholder="Bench Press")
-    colw1, colw2 = st.columns([2,1])
-    with colw1:
-        weight_value = st.number_input("Weight value", min_value=0.0, step=1.0)
-    with colw2:
-        unit = st.selectbox("Unit", ["lb","kg"], index=0)
-    reps = st.number_input("Reps", min_value=1, step=1)
-    rpe = st.text_input("RPE (optional)", placeholder="e.g., 8 or 8.5")
-    notes = st.text_area("Notes (optional)")
-    if st.button("Log Set ✅", type="primary"):
-        if not exercise or weight_value <= 0:
-            st.error("Please enter exercise and a weight > 0.")
-        else:
-            weight_lb = float(weight_value) if unit == "lb" else float(weight_value) * LB_PER_KG
-            insert_set(date_val.strftime("%Y-%m-%d"), exercise, weight_lb, int(reps), rpe, notes)
-            st.success(f"Logged {exercise}: {weight_lb:.1f} lb x {int(reps)}")
-            st.experimental_rerun()
-
-tabs = st.tabs(["Dashboard", "Exercise Detail", "PRs"])
-
-# -------- Dashboard --------
-with tabs[0]:
-    st.subheader("Overview")
+def signup(email, password):
     try:
-        df_all = fetch_sets()
-    except Exception as e:
-        st.stop()
-    if df_all.empty:
-        st.info("No data yet — use the sidebar to log your first set.")
-    else:
-        c1,c2,c3 = st.columns(3)
-        c1.metric("Total Sets", len(df_all))
-        c2.metric("Exercises", df_all["exercise"].nunique())
-        c3.metric("Last Logged", str(df_all["date"].max()))
-        st.markdown("**Recent Entries**")
-        st.dataframe(df_all.sort_values(["date","exercise"], ascending=[False, True]).tail(30), use_container_width=True)
-
-# -------- Exercise Detail --------
-# -------- Exercise Detail --------
-with tabs[1]:
-    st.subheader("Exercise Detail")
-    exs = fetch_exercises()
-    if not exs:
-        st.info("Log data to see exercises.")
-    else:
-        ex = st.selectbox("Choose exercise", options=exs, key="ex_detail")
-        dfe = fetch_sets(ex)
-        if dfe.empty:
-            st.info("No sets yet for this exercise.")
+        res = supabase.auth.sign_up({"email": email, "password": password})
+        if res.user:
+            st.success("Account created! You can now log in.")
         else:
-            # quick-log: same top set as last time
-            last = get_last_topset(dfe)
-            with st.expander("⚡ Quick Log: Same Top Set as Last Time"):
-                if last is None:
-                    st.write("No previous top set found for this exercise.")
-                else:
-                    last_date, last_w, last_reps = last
-                    qcol1, qcol2, qcol3 = st.columns([2,1,1])
-                    with qcol1:
-                        st.write(f"Last top set on **{last_date}** — **{last_w:.0f} lb** x **{last_reps or '-'}**")
-                    with qcol2:
-                        new_reps = st.number_input("New reps", value=int(last_reps or 1), min_value=1, step=1, key="quick_reps")
-                    with qcol3:
-                        if st.button("Log Same Weight ▶️", key="quick_log_btn"):
-                            insert_set(date.today().strftime("%Y-%m-%d"), ex, last_w, int(new_reps), "", f"Quick-log from last top set {last_date}")
-                            st.success(f"Logged {ex}: {last_w:.0f} lb x {int(new_reps)}")
-                            st.experimental_rerun()
+            st.warning("Signup failed.")
+    except Exception as e:
+        st.error(str(e))
 
-            # --- NEW: Delete entries section ---
-            with st.expander("🗑️ Delete Past Entries"):
-                st.caption("Select one or more entries and click **Delete Selected** to permanently remove them from Supabase.")
-                dfe_display = dfe.reset_index(drop=True)
-                selected_rows = st.multiselect(
-                    "Select rows to delete",
-                    dfe_display.index,
-                    format_func=lambda i: f"{dfe_display.loc[i, 'date']} — {dfe_display.loc[i, 'weight_lb']} lb x {dfe_display.loc[i, 'reps']} reps"
-                )
-                if st.button("Delete Selected ❌"):
-                    if selected_rows:
-                        ids_to_delete = [str(dfe_display.loc[i, 'id']) for i in selected_rows if 'id' in dfe_display.columns]
-                        if ids_to_delete:
-                            for id_ in ids_to_delete:
-                                try:
-                                    sb.table(TABLE).delete().eq("id", id_).execute()
-                                except Exception as e:
-                                    st.error(f"Error deleting entry {id_}: {e}")
-                            st.success(f"Deleted {len(ids_to_delete)} record(s).")
-                            st.experimental_rerun()
-                        else:
-                            st.warning("Could not find IDs for the selected rows.")
-                    else:
-                        st.info("No rows selected for deletion.")
+def login(email, password):
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        if res.user:
+            st.session_state.user = res.user
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials.")
+    except Exception as e:
+        st.error(str(e))
 
-            # chart: top set per day
-            tops = compute_topsets_by_day(dfe)
-            if tops.empty:
-                st.info("Log sets to see the chart.")
-            else:
-                fig = plt.figure()
-                plt.plot(pd.to_datetime(tops["date"]), tops["top_weight_lb"], marker="o")
-                plt.title(f"Top Set (Max lb per day) — {ex}")
-                plt.xlabel("Date")
-                plt.ylabel("Weight (lb)")
-                plt.tight_layout()
-                st.pyplot(fig)
+def logout():
+    supabase.auth.sign_out()
+    st.session_state.user = None
+    st.experimental_rerun()
 
-            # suggestion
-            st.markdown("**Suggestion**")
-            st.write(suggestion_next_goal(dfe))
+# --- Login Page ---
+if not st.session_state.user:
+    st.title("🏋️ Progressive Overload — Login / Signup")
 
-            # all sets table
-            st.markdown("**All Sets for This Exercise**")
-            st.dataframe(dfe[["date","exercise","weight_lb","reps","rpe","notes"]], use_container_width=True)
+    tab1, tab2 = st.tabs(["🔑 Login", "🆕 Sign Up"])
 
+    with tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Login"):
+            login(email, password)
 
-            # chart: top set per day
-            tops = compute_topsets_by_day(dfe)
-            if tops.empty:
-                st.info("Log sets to see the chart.")
-            else:
-                fig = plt.figure()
-                plt.plot(pd.to_datetime(tops["date"]), tops["top_weight_lb"], marker="o")
-                plt.title(f"Top Set (Max lb per day) — {ex}")
-                plt.xlabel("Date")
-                plt.ylabel("Weight (lb)")
-                plt.tight_layout()
-                st.pyplot(fig)
+    with tab2:
+        new_email = st.text_input("Email", key="signup_email")
+        new_password = st.text_input("Password", type="password", key="signup_password")
+        if st.button("Create Account"):
+            signup(new_email, new_password)
 
-            # suggestion
-            st.markdown("**Suggestion**")
-            st.write(suggestion_next_goal(dfe))
+    st.stop()
 
-            # all sets table
-            st.markdown("**All Sets for This Exercise**")
-            st.dataframe(dfe[["date","exercise","weight_lb","reps","rpe","notes"]], use_container_width=True)
+# --- Logged In View ---
+st.sidebar.success(f"Logged in as: {st.session_state.user.email}")
+if st.sidebar.button("Logout"):
+    logout()
 
-# -------- PRs --------
-with tabs[2]:
-    st.subheader("Lifetime PRs")
-    df_all = fetch_sets()
-    if df_all.empty:
-        st.info("No data yet.")
-    else:
-        # Best top weight per exercise (heaviest single set)
-        pr_weight = (df_all.sort_values(["exercise","weight_lb","date"])
-                           .groupby("exercise", as_index=False)
-                           .agg(best_weight_lb=("weight_lb","max")))
+st.title("🏋️ Progressive Overload — Cloud Edition (Private)")
 
-        # Best estimated 1RM per exercise
-        tmp = df_all.copy()
-        tmp["e1rm"] = tmp.apply(lambda r: epley_e1rm(r["weight_lb"], int(r["reps"]) if pd.notna(r["reps"]) else 1), axis=1)
-        pr_e1rm = (tmp.sort_values(["exercise","e1rm","date"])
-                        .groupby("exercise", as_index=False)
-                        .agg(best_e1rm=("e1rm","max")))
+st.write("Connected to Supabase ✅")
 
-        prs = pr_weight.merge(pr_e1rm, on="exercise", how="outer")
-        st.dataframe(prs.sort_values("exercise"), use_container_width=True)
+# --- Log Workout ---
+st.header("Log a Set")
+
+date = st.date_input("Date", datetime.date.today())
+exercise = st.text_input("Exercise")
+weight = st.number_input("Weight", min_value=0.0, step=1.0)
+unit = st.selectbox("Unit", ["lb", "kg"])
+reps = st.number_input("Reps", min_value=1, step=1)
+rpe = st.text_input("RPE (optional)")
+notes = st.text_area("Notes (optional)")
+
+if st.button("Log Set ✅"):
+    weight_lb = convert_to_lb(weight, unit)
+    supabase.table("workouts").insert({
+        "user_id": st.session_state.user.id,
+        "date": str(date),
+        "exercise": exercise,
+        "weight_lb": weight_lb,
+        "reps": reps,
+        "rpe": rpe,
+        "notes": notes
+    }).execute()
+    st.success(f"Logged {exercise} — {weight_lb:.1f} lb x {reps} reps")
+    st.experimental_rerun()
+
+# --- Load Data ---
+data = get_user_data(st.session_state.user.id)
+
+if not data.empty:
+    st.subheader("📈 Exercise Progress")
+    selected_exercise = st.selectbox("Choose an exercise to view progress", data["exercise"].unique())
+    df_ex = data[data["exercise"] == selected_exercise].sort_values("date")
+
+    st.line_chart(df_ex, x="date", y="weight_lb")
+
+    top_set = df_ex["weight_lb"].max()
+    st.info(f"Your top set for {selected_exercise}: **{top_set} lb**")
+
+    # --- AI Suggestion ---
+    avg_reps = df_ex["reps"].mean()
+    next_goal = round(top_set * 1.02, 1)
+    st.write(f"💡 Suggestion: Next session, aim for **{next_goal} lb** x **{int(avg_reps)} reps**")
+
+    # --- Delete Section ---
+    st.subheader("🗑️ Delete Past Entries")
+    delete_row = st.multiselect("Select rows to delete:", df_ex.index, format_func=lambda i: f"{df_ex.iloc[i]['date']} — {df_ex.iloc[i]['exercise']} ({df_ex.iloc[i]['weight_lb']} lb x {df_ex.iloc[i]['reps']} reps)")
+    if st.button("Delete Selected"):
+        for i in delete_row:
+            row_id = df_ex.iloc[i]["id"]
+            supabase.table("workouts").delete().eq("id", row_id).execute()
+        st.success("Deleted selected entries.")
+        st.experimental_rerun()
+else:
+    st.warning("No data yet — log your first workout above!")
