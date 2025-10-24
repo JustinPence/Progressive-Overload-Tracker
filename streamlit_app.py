@@ -120,18 +120,48 @@ if not data.empty:
     st.info(f"Your top set for {selected_exercise}: **{top_set} lb**")
 
     # --- AI Suggestion ---
-    avg_reps = df_ex["reps"].mean()
-    next_goal = round(top_set * 1.02, 1)
-    st.write(f"💡 Suggestion: Next session, aim for **{next_goal} lb** x **{int(avg_reps)} reps**")
+import openai
 
-    # --- Delete Section ---
-    st.subheader("🗑️ Delete Past Entries")
-    delete_row = st.multiselect("Select rows to delete:", df_ex.index, format_func=lambda i: f"{df_ex.iloc[i]['date']} — {df_ex.iloc[i]['exercise']} ({df_ex.iloc[i]['weight_lb']} lb x {df_ex.iloc[i]['reps']} reps)")
-    if st.button("Delete Selected"):
-        for i in delete_row:
-            row_id = df_ex.iloc[i]["id"]
-            supabase.table("workouts").delete().eq("id", row_id).execute()
-        st.success("Deleted selected entries.")
-        st.experimental_rerun()
+openai.api_key = st.secrets.get("OPENAI_API_KEY")
+
+def generate_ai_suggestion(exercise, data):
+    recent = data[data["exercise"] == exercise].sort_values("date", ascending=False).head(5)
+    text_summary = "\n".join(
+        f"{r['date']}: {r['weight_lb']} lb x {r['reps']} reps" for _, r in recent.iterrows()
+    )
+
+    prompt = f"""
+    You are a strength training coach. Based on the following recent {exercise} logs:
+    {text_summary}
+
+    Suggest a specific next workout goal (weight and reps) and include a short motivational tip.
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"AI suggestion unavailable: {e}"
+
+
+# ==== Delete Section ====
+st.subheader("🗑️ Delete Past Entries")
+delete_row = st.multiselect(
+    "Select rows to delete:",
+    df_ex.index,
+    format_func=lambda i: f"{df_ex.iloc[i]['date']} – {df_ex.iloc[i]['exercise']} ({df_ex.iloc[i]['weight_lb']} lb x {df_ex.iloc[i]['reps']})",
+)
+
+if st.button("Delete Selected"):
+    for i in delete_row:
+        row_id = df_ex.iloc[i]["id"]
+        supabase.table("workouts").delete().eq("id", row_id).execute()
+    st.success("Deleted selected entries.")
+    st.experimental_rerun()
 else:
-    st.warning("No data yet — log your first workout above!")
+    st.warning("No data yet – log your first workout above!")
