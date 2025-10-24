@@ -93,6 +93,7 @@ rpe = st.text_input("RPE (optional)")
 notes = st.text_area("Notes (optional)")
 
 if st.button("Log Set ✅"):
+    exercise = exercise.strip().title()
     weight_lb = convert_to_lb(weight, unit)
     supabase.table("workouts").insert({
         "user_id": st.session_state.user.id,
