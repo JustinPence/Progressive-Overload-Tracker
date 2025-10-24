@@ -167,6 +167,7 @@ with tabs[0]:
         st.dataframe(df_all.sort_values(["date","exercise"], ascending=[False, True]).tail(30), use_container_width=True)
 
 # -------- Exercise Detail --------
+# -------- Exercise Detail --------
 with tabs[1]:
     st.subheader("Exercise Detail")
     exs = fetch_exercises()
@@ -195,6 +196,53 @@ with tabs[1]:
                             insert_set(date.today().strftime("%Y-%m-%d"), ex, last_w, int(new_reps), "", f"Quick-log from last top set {last_date}")
                             st.success(f"Logged {ex}: {last_w:.0f} lb x {int(new_reps)}")
                             st.experimental_rerun()
+
+            # --- NEW: Delete entries section ---
+            with st.expander("🗑️ Delete Past Entries"):
+                st.caption("Select one or more entries and click **Delete Selected** to permanently remove them from Supabase.")
+                dfe_display = dfe.reset_index(drop=True)
+                selected_rows = st.multiselect(
+                    "Select rows to delete",
+                    dfe_display.index,
+                    format_func=lambda i: f"{dfe_display.loc[i, 'date']} — {dfe_display.loc[i, 'weight_lb']} lb x {dfe_display.loc[i, 'reps']} reps"
+                )
+                if st.button("Delete Selected ❌"):
+                    if selected_rows:
+                        ids_to_delete = [str(dfe_display.loc[i, 'id']) for i in selected_rows if 'id' in dfe_display.columns]
+                        if ids_to_delete:
+                            for id_ in ids_to_delete:
+                                try:
+                                    sb.table(TABLE).delete().eq("id", id_).execute()
+                                except Exception as e:
+                                    st.error(f"Error deleting entry {id_}: {e}")
+                            st.success(f"Deleted {len(ids_to_delete)} record(s).")
+                            st.experimental_rerun()
+                        else:
+                            st.warning("Could not find IDs for the selected rows.")
+                    else:
+                        st.info("No rows selected for deletion.")
+
+            # chart: top set per day
+            tops = compute_topsets_by_day(dfe)
+            if tops.empty:
+                st.info("Log sets to see the chart.")
+            else:
+                fig = plt.figure()
+                plt.plot(pd.to_datetime(tops["date"]), tops["top_weight_lb"], marker="o")
+                plt.title(f"Top Set (Max lb per day) — {ex}")
+                plt.xlabel("Date")
+                plt.ylabel("Weight (lb)")
+                plt.tight_layout()
+                st.pyplot(fig)
+
+            # suggestion
+            st.markdown("**Suggestion**")
+            st.write(suggestion_next_goal(dfe))
+
+            # all sets table
+            st.markdown("**All Sets for This Exercise**")
+            st.dataframe(dfe[["date","exercise","weight_lb","reps","rpe","notes"]], use_container_width=True)
+
 
             # chart: top set per day
             tops = compute_topsets_by_day(dfe)
