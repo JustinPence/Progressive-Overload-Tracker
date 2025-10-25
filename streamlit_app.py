@@ -128,15 +128,13 @@ with tab1:
 # When the user clicks the "Log Set" button
 if st.button("Log Set ✅"):
     # Get the current session from Supabase
-    session = supabase.auth.get_session()
-
-    # Check that a user is authenticated
-    if not session or not session.user:
+    user = supabase.auth.get_user()
+    if not user:
         st.error("You must be logged in to log a set.")
         st.stop()
+    user_id = user.id
 
-    # Obtain the authenticated user ID (UUID)
-    user_id = session.user.id
+
 
     # Clean up and convert inputs
     exercise_name = exercise.strip().title()
