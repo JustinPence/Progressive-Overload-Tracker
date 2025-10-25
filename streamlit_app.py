@@ -212,16 +212,19 @@ with tab2:
             st.info(suggestion)
 
         # --- Delete Section ---
-        st.subheader("🗑️ Delete Past Entries")
         delete_row = st.multiselect(
-            "Select rows to delete:",
-            df_ex.index,
-            format_func=lambda i: f"{df_ex.iloc[i]['date']} – ({df_ex.iloc[i]['weight_lb']} lb x {df_ex.iloc[i]['reps']} reps)"
-        )
+    "Select rows to delete:",
+    df_ex.index,  # these are the actual row labels
+    format_func=lambda idx: (
+        f"{df_ex.loc[idx, 'date']} – "
+        f"({df_ex.loc[idx, 'weight_lb']} lb x {df_ex.loc[idx, 'reps']} reps)"
+    )
+)
 
-        if st.button("Delete Selected"):
-            for i in delete_row:
-                row_id = df_ex.iloc[i]["id"]
-                supabase.table("workouts").delete().eq("id", row_id).execute()
-            st.success("Deleted selected entries.")
-            st.experimental_rerun()
+if st.button("Delete Selected"):
+    for idx in delete_row:
+        row_id = df_ex.loc[idx, "id"]
+        supabase.table("workouts").delete().eq("id", row_id).execute()
+    st.success("Deleted selected entries.")
+    st.rerun()
+
