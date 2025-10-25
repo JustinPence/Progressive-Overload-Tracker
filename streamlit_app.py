@@ -125,21 +125,26 @@ with tab1:
     reps = st.number_input("Reps", min_value=1, step=1)
     rpe = st.text_input("RPE (optional)")
     notes = st.text_area("Notes (optional)")
+if st.button("Log Set ✅"):
+    exercise = exercise.strip().title()
+    weight_lb = convert_to_lb(weight, unit)
 
-    if st.button("Log Set ✅"):
-        exercise = exercise.strip().title()
-        weight_lb = convert_to_lb(weight, unit)
-        supabase.table("workouts").insert({
-            "user_id": st.session_state["user"]["id"],
-            "date": str(date),
-            "exercise": exercise,
-            "weight_lb": weight_lb,
-            "reps": reps,
-            "rpe": rpe,
-            "notes": notes
-        }).execute()
-        st.success(f"Logged {exercise} — {weight_lb:.1f} lb x {reps} reps")
-        st.experimental_rerun()
+    user = st.session_state.user  # ✅ use the existing logged-in user object
+
+    supabase.table("workouts").insert({
+        "user_id": user.id,  # ✅ correct way to pass user_id
+        "date": str(date),
+        "exercise": exercise,
+        "weight_lb": weight_lb,
+        "reps": reps,
+        "rpe": rpe,
+        "notes": notes
+    }).execute()
+
+    st.success(f"Logged {exercise} — {weight_lb:.1f} lb x {reps} reps")
+    st.experimental_rerun()
+
+
 
 # --- Tab 2: Progress ---
 with tab2:
