@@ -149,8 +149,10 @@ with tab1:
             ).execute()
 
             # If no exception was raised, assume success
+            # After a successful insert
             st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
-            st.experimental_rerun()
+            st.rerun()
+
 
         except Exception as e:
             # If the RPC call itself fails, show the exception
