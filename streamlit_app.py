@@ -127,14 +127,15 @@ with tab1:
     notes = st.text_area("Notes (optional)")
 # When the user clicks the "Log Set" button
 if st.button("Log Set ✅"):
-    # Get the current session from Supabase
+    # Try to get user ID from Supabase auth, fall back to session state
     user = supabase.auth.get_user()
-    if not user:
+    if user:
+        user_id = user.id
+    elif "user" in st.session_state and st.session_state.user:
+        user_id = st.session_state.user.id
+    else:
         st.error("You must be logged in to log a set.")
         st.stop()
-    user_id = user.id
-
-
 
     # Clean up and convert inputs
     exercise_name = exercise.strip().title()
@@ -157,8 +158,6 @@ if st.button("Log Set ✅"):
     try:
         # Insert the record into the workouts table
         response = supabase.table("workouts").insert(payload).execute()
-
-        # If data is returned, insertion succeeded
         if response.data:
             st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
             st.experimental_rerun()
