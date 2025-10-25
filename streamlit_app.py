@@ -127,44 +127,30 @@ with tab1:
     notes = st.text_area("Notes (optional)")
 # When the user clicks the "Log Set" button
 if st.button("Log Set ✅"):
-    # Try to get user ID from Supabase auth, fall back to session state
-    user = supabase.auth.get_user()
-    if user:
-        user_id = user.id
-    elif "user" in st.session_state and st.session_state.user:
-        user_id = st.session_state.user.id
-    else:
-        st.error("You must be logged in to log a set.")
-        st.stop()
-
-    # Clean up and convert inputs
+    # make sure user is logged in (keep your existing checks)
+    # clean/convert inputs
     exercise_name = exercise.strip().title()
     weight_lb = convert_to_lb(weight, unit)
 
-    # Build the record payload
-    payload = {
-        "user_id": user_id,
-        "date": str(date),
-        "exercise": exercise_name,
-        "weight_lb": weight_lb,
-        "reps": reps,
-        "rpe": rpe,
-        "notes": notes,
-    }
+    # call the stored procedure instead of supabase.table().insert()
+    response = supabase.rpc(
+        "insert_workout",
+        {
+            "_date": str(date),
+            "_exercise": exercise_name,
+            "_weight_lb": weight_lb,
+            "_reps": reps,
+            "_rpe": rpe,
+            "_notes": notes,
+        },
+    ).execute()
 
-    # Print payload to Streamlit logs for debugging
-    print("🧩 Insert payload:", payload)
+    if response.error:
+        st.error(f"❌ Failed to log set: {response.error}")
+    else:
+        st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
+        st.experimental_rerun()
 
-    try:
-        # Insert the record into the workouts table
-        response = supabase.table("workouts").insert(payload).execute()
-        if response.data:
-            st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
-            st.experimental_rerun()
-        else:
-            st.warning("Insert executed, but no data returned — check RLS or authentication.")
-    except Exception as e:
-        st.error(f"❌ Failed to log set: {e}")
 
 
 # --- Tab 2: Progress ---
