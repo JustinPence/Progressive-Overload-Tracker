@@ -127,47 +127,46 @@ with tab1:
     notes = st.text_area("Notes (optional)")
 # When the user clicks the "Log Set" button
 if st.button("Log Set ✅"):
-    # Make sure the user is logged in before proceeding
-    if "user" not in st.session_state or not st.session_state.user:
+    # Get the current session from Supabase
+    session = supabase.auth.get_session()
+
+    # Check that a user is authenticated
+    if not session or not session.user:
         st.error("You must be logged in to log a set.")
         st.stop()
 
-    # Grab the authenticated user’s UUID from Supabase auth
-    user_id = st.session_state.user.id
+    # Obtain the authenticated user ID (UUID)
+    user_id = session.user.id
 
-    # Normalize/clean the exercise name and convert weight to pounds
-    exercise = exercise.strip().title()
+    # Clean up and convert inputs
+    exercise_name = exercise.strip().title()
     weight_lb = convert_to_lb(weight, unit)
 
     # Build the record payload
     payload = {
         "user_id": user_id,
-        "date": str(date),   # convert date to string format that Supabase expects
-        "exercise": exercise,
+        "date": str(date),
+        "exercise": exercise_name,
         "weight_lb": weight_lb,
         "reps": reps,
         "rpe": rpe,
         "notes": notes,
     }
 
-    # Print the payload to the logs so you can inspect it in Streamlit Cloud
-    # This helps confirm that user_id is a valid UUID and not None
+    # Print payload to Streamlit logs for debugging
     print("🧩 Insert payload:", payload)
 
     try:
-        # Attempt to insert the workout into the workouts table
+        # Insert the record into the workouts table
         response = supabase.table("workouts").insert(payload).execute()
 
-        # If Supabase returns data in the response, the insert succeeded
+        # If data is returned, insertion succeeded
         if response.data:
-            st.success(f"✅ Logged {exercise}: {weight_lb:.1f} lb × {reps} reps")
-            # Re-run the app so the user sees the updated data immediately
+            st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
             st.experimental_rerun()
         else:
-            # If no data was returned, there may be an RLS or auth issue
-            st.warning("Insert executed, but no data returned — check RLS or ensure the user is authenticated.")
+            st.warning("Insert executed, but no data returned — check RLS or authentication.")
     except Exception as e:
-        # Show the exception message to the user if something goes wrong
         st.error(f"❌ Failed to log set: {e}")
 
 
