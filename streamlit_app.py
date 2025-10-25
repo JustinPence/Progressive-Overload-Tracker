@@ -126,23 +126,28 @@ with tab1:
     rpe = st.text_input("RPE (optional)")
     notes = st.text_area("Notes (optional)")
 if st.button("Log Set ✅"):
+    if "user" not in st.session_state or not st.session_state.user:
+        st.error("You must be logged in to log a set.")
+        st.stop()
+
+    user_id = st.session_state.user.id  # ✅ safe way to get UUID
     exercise = exercise.strip().title()
     weight_lb = convert_to_lb(weight, unit)
 
-    user = st.session_state.user  # ✅ use the existing logged-in user object
-
-    supabase.table("workouts").insert({
-        "user_id": user.id,  # ✅ correct way to pass user_id
-        "date": str(date),
-        "exercise": exercise,
-        "weight_lb": weight_lb,
-        "reps": reps,
-        "rpe": rpe,
-        "notes": notes
-    }).execute()
-
-    st.success(f"Logged {exercise} — {weight_lb:.1f} lb x {reps} reps")
-    st.experimental_rerun()
+    try:
+        supabase.table("workouts").insert({
+            "user_id": user_id,
+            "date": str(date),
+            "exercise": exercise,
+            "weight_lb": weight_lb,
+            "reps": reps,
+            "rpe": rpe,
+            "notes": notes
+        }).execute()
+        st.success(f"Set logged: {exercise} — {weight_lb:.1f} lb x {reps} reps ✅")
+        st.experimental_rerun()
+    except Exception as e:
+        st.error(f"❌ Failed to log set: {e}")
 
 
 
