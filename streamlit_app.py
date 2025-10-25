@@ -125,34 +125,51 @@ with tab1:
     reps = st.number_input("Reps", min_value=1, step=1)
     rpe = st.text_input("RPE (optional)")
     notes = st.text_area("Notes (optional)")
+# When the user clicks the "Log Set" button
 if st.button("Log Set ✅"):
+    # Make sure the user is logged in before proceeding
     if "user" not in st.session_state or not st.session_state.user:
         st.error("You must be logged in to log a set.")
         st.stop()
 
-    user_id = st.session_state.user.id  # ✅ Auth UUID from Supabase
+    # Grab the authenticated user’s UUID from Supabase auth
+    user_id = st.session_state.user.id
+
+    # Normalize/clean the exercise name and convert weight to pounds
     exercise = exercise.strip().title()
     weight_lb = convert_to_lb(weight, unit)
 
-    try:
-        response = supabase.table("workouts").insert({
-            "user_id": user_id,
-            "date": str(date),
-            "exercise": exercise,
-            "weight_lb": weight_lb,
-            "reps": reps,
-            "rpe": rpe,
-            "notes": notes
-        }).execute()
+    # Build the record payload
+    payload = {
+        "user_id": user_id,
+        "date": str(date),   # convert date to string format that Supabase expects
+        "exercise": exercise,
+        "weight_lb": weight_lb,
+        "reps": reps,
+        "rpe": rpe,
+        "notes": notes,
+    }
 
-        # ✅ Show result if success
+    # Print the payload to the logs so you can inspect it in Streamlit Cloud
+    # This helps confirm that user_id is a valid UUID and not None
+    print("🧩 Insert payload:", payload)
+
+    try:
+        # Attempt to insert the workout into the workouts table
+        response = supabase.table("workouts").insert(payload).execute()
+
+        # If Supabase returns data in the response, the insert succeeded
         if response.data:
             st.success(f"✅ Logged {exercise}: {weight_lb:.1f} lb × {reps} reps")
+            # Re-run the app so the user sees the updated data immediately
             st.experimental_rerun()
         else:
-            st.warning("Insert executed, but no data returned — check RLS or auth user_id.")
+            # If no data was returned, there may be an RLS or auth issue
+            st.warning("Insert executed, but no data returned — check RLS or ensure the user is authenticated.")
     except Exception as e:
+        # Show the exception message to the user if something goes wrong
         st.error(f"❌ Failed to log set: {e}")
+
 
 # --- Tab 2: Progress ---
 with tab2:
