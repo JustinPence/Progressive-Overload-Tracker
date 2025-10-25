@@ -129,38 +129,43 @@ with tab1:
     rpe = st.text_input("RPE (optional)")
     notes = st.text_area("Notes (optional)")
 
-    if st.button("Log Set ✅"):
-        if not st.session_state.user:
-            st.error("You must be logged in to log a set.")
-            st.stop()
+if st.button("Log Set ✅"):
+    # Ensure the user is logged in
+    if not st.session_state.user:
+        st.error("You must be logged in to log a set.")
+        st.stop()
 
-        exercise_name = exercise.strip().title()
-        weight_lb = convert_to_lb(weight, unit)
+    # Clean and convert inputs
+    exercise_name = exercise.strip().title()
+    weight_lb = convert_to_lb(weight, unit)
 
-        try:
-            # Call the stored procedure. It returns no data if successful.
-            supabase.rpc(
-                "insert_workout",
-                {
-                    "_date": str(date),
-                    "_exercise": exercise_name,
-                    "_weight_lb": weight_lb,
-                    "_reps": reps,
-                    "_rpe": rpe,
-                    "_notes": notes,
-                },
-            ).execute()
+    # Get the authenticated user’s UUID from session state
+    user_id = st.session_state.user.id
 
-            # If no exception was raised, assume success
-            # After a successful insert
+    try:
+        # Insert the workout directly into the workouts table
+        response = supabase.table("workouts").insert({
+            "user_id": user_id,
+            "date": str(date),
+            "exercise": exercise_name,
+            "weight_lb": weight_lb,
+            "reps": reps,
+            "rpe": rpe,
+            "notes": notes
+        }).execute()
+
+        # Debug: write the raw response to Streamlit logs
+        print("Insert response:", response)
+
+        # If response.data is truthy, the insert succeeded
+        if response and getattr(response, "data", None):
             st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
             st.rerun()
+        else:
+            st.error("❌ Failed to log set: the insert returned no data (check RLS and auth).")
 
-
-        except Exception as e:
-            # If the RPC call itself fails, show the exception
-            st.error(f"❌ Failed to log set: {e}")
-
+    except Exception as e:
+        st.error(f"❌ Failed to log set: {e}")
 
 # --- Tab 2: Progress ---
 with tab2:
