@@ -71,15 +71,18 @@ def signup(email, password):
 def login(email, password):
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        # res.session contains the tokens; res.user is the authenticated user
         if res.session and res.user:
-            # Set the session on the Supabase client so future calls are authenticated
+            # Tell the Supabase client to use this session for future requests
             supabase.auth.set_session(res.session.access_token, res.session.refresh_token)
             st.session_state.user = res.user
-            st.rerun()
+            st.rerun()  # refresh the app to show the logged-in view
         else:
             st.error("Invalid credentials.")
     except Exception as e:
         st.error(str(e))
+
+
 
 
 def logout():
