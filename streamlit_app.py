@@ -127,34 +127,35 @@ with tab1:
     notes = st.text_area("Notes (optional)")
 
     if st.button("Log Set ✅"):
-        # Ensure the user is still logged in
         if not st.session_state.user:
             st.error("You must be logged in to log a set.")
             st.stop()
 
-        # Clean and convert inputs
         exercise_name = exercise.strip().title()
         weight_lb = convert_to_lb(weight, unit)
 
-        # Call the stored procedure to insert the workout; it sets user_id automatically
-        response = supabase.rpc(
-            "insert_workout",
-            {
-                "_date": str(date),
-                "_exercise": exercise_name,
-                "_weight_lb": weight_lb,
-                "_reps": reps,
-                "_rpe": rpe,
-                "_notes": notes,
-            },
-        ).execute()
+        try:
+            # Call the stored procedure. It returns no data if successful.
+            supabase.rpc(
+                "insert_workout",
+                {
+                    "_date": str(date),
+                    "_exercise": exercise_name,
+                    "_weight_lb": weight_lb,
+                    "_reps": reps,
+                    "_rpe": rpe,
+                    "_notes": notes,
+                },
+            ).execute()
 
-        # Check if we received data (success); supabase-py v2 doesn't have .error
-        if not response or not getattr(response, "data", None):
-            st.error("❌ Failed to log set: an unexpected error occurred.")
-        else:
+            # If no exception was raised, assume success
             st.success(f"✅ Logged {exercise_name}: {weight_lb:.1f} lb × {reps} reps")
             st.experimental_rerun()
+
+        except Exception as e:
+            # If the RPC call itself fails, show the exception
+            st.error(f"❌ Failed to log set: {e}")
+
 
 # --- Tab 2: Progress ---
 with tab2:
