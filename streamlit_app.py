@@ -130,12 +130,12 @@ if st.button("Log Set ✅"):
         st.error("You must be logged in to log a set.")
         st.stop()
 
-    user_id = st.session_state.user.id  # ✅ safe way to get UUID
+    user_id = st.session_state.user.id  # ✅ Auth UUID from Supabase
     exercise = exercise.strip().title()
     weight_lb = convert_to_lb(weight, unit)
 
     try:
-        supabase.table("workouts").insert({
+        response = supabase.table("workouts").insert({
             "user_id": user_id,
             "date": str(date),
             "exercise": exercise,
@@ -144,12 +144,15 @@ if st.button("Log Set ✅"):
             "rpe": rpe,
             "notes": notes
         }).execute()
-        st.success(f"Set logged: {exercise} — {weight_lb:.1f} lb x {reps} reps ✅")
-        st.experimental_rerun()
+
+        # ✅ Show result if success
+        if response.data:
+            st.success(f"✅ Logged {exercise}: {weight_lb:.1f} lb × {reps} reps")
+            st.experimental_rerun()
+        else:
+            st.warning("Insert executed, but no data returned — check RLS or auth user_id.")
     except Exception as e:
         st.error(f"❌ Failed to log set: {e}")
-
-
 
 # --- Tab 2: Progress ---
 with tab2:
