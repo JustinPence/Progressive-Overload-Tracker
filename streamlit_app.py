@@ -130,7 +130,7 @@ with tab1:
         exercise = exercise.strip().title()
         weight_lb = convert_to_lb(weight, unit)
         supabase.table("workouts").insert({
-            "user_id": st.session_state.user.id,
+            "user_id": st.session_state["user"]["id"],
             "date": str(date),
             "exercise": exercise,
             "weight_lb": weight_lb,
